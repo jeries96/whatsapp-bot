@@ -210,7 +210,8 @@ def send_whatsapp_payload(payload):
         "Content-Type": "application/json"
     }
     response = requests.post(META_API_URL, headers=headers, json=payload)
-    return jsonify({"status": response.status_code})
+    return jsonify({"status": response.status_code}), response.status_code
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))

@@ -1,16 +1,17 @@
 import os
-from flask import Flask, request, jsonify
-from datetime import datetime, timedelta
+from datetime import timedelta
+
 import requests
+from flask import Flask
 
 app = Flask(__name__)
 data_store = {}
-
 
 # --- Settings ---
 SESSION_TIMEOUT_MINUTES = 15
 META_API_URL = os.environ.get("META_API_URL")
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
+
 
 def send_whatsapp_message(phone_number, message):
     headers = {
@@ -27,11 +28,14 @@ def send_whatsapp_message(phone_number, message):
     print("Meta Response:", response.status_code, response.text)  # ← add this
     return response.status_code
 
+
 def is_session_expired(last_interaction_time):
     return datetime.now() - last_interaction_time > timedelta(minutes=SESSION_TIMEOUT_MINUTES)
 
+
 def update_last_interaction(user_record):
     user_record["last_interaction_time"] = datetime.now()
+
 
 from flask import Flask, request, jsonify
 from datetime import datetime
@@ -39,60 +43,61 @@ from datetime import datetime
 app = Flask(__name__)
 data_store = {}
 
+
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
+    data = request.get_json()
+
+    # DEBUG: print the raw payload
+    print("Incoming webhook:", json.dumps(data, indent=2))
+
     try:
-        data = request.get_json()
+        value = data['entry'][0]['changes'][0]['value']
+        messages = value.get("messages")
 
-        if not data or "entry" not in data:
-            return jsonify({"error": "Invalid request structure"}), 400
+        if not messages:
+            # Not a user message (e.g. delivery status) → just acknowledge
+            return jsonify({"status": "non-message"}), 200
 
-        try:
-            phone_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-            message = data['entry'][0]['changes'][0]['value']['messages'][0]
-        except (KeyError, IndexError):
-            return jsonify({"error": "Missing required fields"}), 400
-
+        message = messages[0]
+        phone_number = message.get("from")
         msg_type = message.get("type")
-        user = data_store.get(phone_number)
 
-        # Initialize user session
-        if not user:
-            user = {
+        if not phone_number:
+            return jsonify({"error": "Missing phone_number"}), 400
+
+        # Initialize or reset session if needed
+        user = data_store.get(phone_number)
+        if not user or user.get("last_step") == "confirm":
+            data_store[phone_number] = {
                 "last_step": "main_menu",
                 "service": None,
                 "name": None,
                 "date": None,
                 "time": None,
-                "completed": False,
                 "last_interaction_time": datetime.now()
             }
-            data_store[phone_number] = user
             return send_main_menu(phone_number)
 
-        # Stop interaction after confirmation unless user sends a new message
-        if user.get("completed", False) and msg_type != "text":
-            return jsonify({"status": "ignored"}), 200
+        user = data_store[phone_number]
+        update_last_interaction(user)
 
-        # Interactive response handler
+        # --- Interactive message (list reply)
         if msg_type == "interactive":
             selected_id = message["interactive"]["list_reply"]["id"]
-            step = user["last_step"]
 
-            if step == "main_menu":
+            if user["last_step"] == "main_menu":
                 if selected_id == "d1":
                     user["last_step"] = "choose_service"
                     return send_service_list(phone_number)
                 elif selected_id == "d2":
                     user["last_step"] = "choose_service"
-                    send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
-                    return jsonify({"status": "sent"}), 200
+                    return send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
                 elif selected_id == "d3":
                     user["last_step"] = "choose_service"
-                    send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
-                    return jsonify({"status": "sent"}), 200
+                    return send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
 
-            elif step == "choose_service":
+            elif user["last_step"] == "choose_service":
                 service_map = {
                     "1": "أكريلك",
                     "2": "جل",
@@ -100,39 +105,42 @@ def whatsapp_webhook():
                 }
                 user["service"] = service_map.get(selected_id, "غير معروف")
                 user["last_step"] = "ask_name"
-                send_whatsapp_message(phone_number, "شو الاسم؟")
-                return jsonify({"status": "sent"}), 200
+                return send_whatsapp_message(phone_number, "شو الاسم؟")
 
-            elif step == "choose_date":
+            elif user["last_step"] == "choose_date":
                 user["date"] = selected_id
                 user["last_step"] = "choose_time"
                 return send_time_slots(phone_number)
 
-            elif step == "choose_time":
+            elif user["last_step"] == "choose_time":
                 user["time"] = selected_id
                 user["last_step"] = "confirm"
                 return send_confirmation(phone_number, user)
 
-            elif step == "confirm":
-                # Mark session complete
-                user["completed"] = True
-                return jsonify({"status": "done"}), 200
+        # --- Text message (used for name)
+        elif msg_type == "text":
+            if user["last_step"] == "ask_name":
+                user["name"] = message["text"]["body"]
+                user["last_step"] = "choose_date"
+                return send_date_slots(phone_number)
 
-        elif msg_type == "text" and user["last_step"] == "ask_name":
-            user["name"] = message["text"]["body"]
-            user["last_step"] = "choose_date"
-            return send_date_slots(phone_number)
+            if user["last_step"] == "confirm":
+                # After confirmation, user can restart by sending any message
+                data_store[phone_number] = {
+                    "last_step": "main_menu",
+                    "service": None,
+                    "name": None,
+                    "date": None,
+                    "time": None,
+                    "last_interaction_time": datetime.now()
+                }
+                return "DONE"
 
-        # Fallback response
-        return jsonify({"status": "ignored"}), 200
+        return jsonify({"status": "message ignored"}), 200
 
     except Exception as e:
-        print("Webhook error:", e)
-        return jsonify({"error": str(e)}), 500
-
-
-import os
-from flask import request, jsonify
+        print("Webhook error:", str(e))
+        return jsonify({"error": "internal error"}), 500
 
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
@@ -152,7 +160,6 @@ def verify_webhook():
     else:
         print("WEBHOOK VERIFICATION MISSING PARAMS ⚠️")
         return jsonify({"error": "Missing mode or token"}), 400
-
 
 
 def send_main_menu(phone_number):
@@ -179,6 +186,7 @@ def send_main_menu(phone_number):
     }
     return send_whatsapp_payload(payload)
 
+
 def send_service_list(phone_number):
     payload = {
         "messaging_product": "whatsapp",
@@ -202,6 +210,7 @@ def send_service_list(phone_number):
     }
     return send_whatsapp_payload(payload)
 
+
 def send_date_slots(phone_number):
     payload = {
         "messaging_product": "whatsapp",
@@ -214,12 +223,13 @@ def send_date_slots(phone_number):
                 "button": "تواريخ",
                 "sections": [{
                     "title": "Available Dates",
-                    "rows": [{"id": f"2025-07-{i+18}", "title": f"2025-07-{i+18}"} for i in range(7)]
+                    "rows": [{"id": f"2025-07-{i + 18}", "title": f"2025-07-{i + 18}"} for i in range(7)]
                 }]
             }
         }
     }
     return send_whatsapp_payload(payload)
+
 
 def send_time_slots(phone_number):
     payload = {
@@ -233,12 +243,13 @@ def send_time_slots(phone_number):
                 "button": "اوقات",
                 "sections": [{
                     "title": "Available Times",
-                    "rows": [{"id": f"{10+i}:00", "title": f"{10+i}:00"} for i in range(7)]
+                    "rows": [{"id": f"{10 + i}:00", "title": f"{10 + i}:00"} for i in range(7)]
                 }]
             }
         }
     }
     return send_whatsapp_payload(payload)
+
 
 def send_confirmation(phone_number, user):
     msg = (
@@ -249,6 +260,7 @@ def send_confirmation(phone_number, user):
         f"الوقت: {user['time']}\n"
     )
     return send_whatsapp_message(phone_number, msg)
+
 
 def send_whatsapp_payload(payload):
     headers = {

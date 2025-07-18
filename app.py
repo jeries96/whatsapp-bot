@@ -85,10 +85,12 @@ def whatsapp_webhook():
                     return send_service_list(phone_number)
                 elif selected_id == "d2":
                     user["last_step"] = "choose_service"
-                    return send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
+                    send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
+                    return jsonify({"status": "sent"}), 200
                 elif selected_id == "d3":
                     user["last_step"] = "choose_service"
-                    return send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
+                    send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
+                    return jsonify({"status": "sent"}), 200
 
             elif step == "choose_service":
                 service_map = {
@@ -98,7 +100,8 @@ def whatsapp_webhook():
                 }
                 user["service"] = service_map.get(selected_id, "غير معروف")
                 user["last_step"] = "ask_name"
-                return send_whatsapp_message(phone_number, "شو الاسم؟")
+                send_whatsapp_message(phone_number, "شو الاسم؟")
+                return jsonify({"status": "sent"}), 200
 
             elif step == "choose_date":
                 user["date"] = selected_id

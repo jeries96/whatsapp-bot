@@ -33,97 +33,120 @@ def is_session_expired(last_interaction_time):
 def update_last_interaction(user_record):
     user_record["last_interaction_time"] = datetime.now()
 
+from flask import Flask, request, jsonify
+from datetime import datetime
+
+app = Flask(__name__)
+data_store = {}
+
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
-    data = request.get_json()
-
     try:
-        phone_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-        message = data['entry'][0]['changes'][0]['value']['messages'][0]
-    except KeyError:
-        return jsonify({"error": "Invalid structure"}), 400
+        data = request.get_json()
 
-    msg_type = message.get("type")
-    user = data_store.get(phone_number)
+        if not data or "entry" not in data:
+            return jsonify({"error": "Invalid request structure"}), 400
 
-    # --------------------------
-    # 1. New user or reactivated after confirm
-    # --------------------------
-    if not user or user.get("last_step") == "confirm":
-        # Start session
-        data_store[phone_number] = {
-            "last_step": "main_menu",
-            "service": None,
-            "name": None,
-            "date": None,
-            "time": None,
-            "last_interaction_time": datetime.now()
-        }
-        return send_main_menu(phone_number)
+        try:
+            phone_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
+            message = data['entry'][0]['changes'][0]['value']['messages'][0]
+        except (KeyError, IndexError):
+            return jsonify({"error": "Missing required fields"}), 400
 
-    # Existing active user
-    user = data_store[phone_number]
-    update_last_interaction(user)
+        msg_type = message.get("type")
+        user = data_store.get(phone_number)
 
-    # --------------------------
-    # 2. Interactive Messages
-    # --------------------------
-    if msg_type == "interactive":
-        selected_id = message["interactive"]["list_reply"]["id"]
-
-        if user["last_step"] == "main_menu":
-            if selected_id == "d1":
-                user["last_step"] = "choose_service"
-                return send_service_list(phone_number)
-            elif selected_id == "d2":
-                return send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
-            elif selected_id == "d3":
-                return send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
-
-        elif user["last_step"] == "choose_service":
-            service_map = {
-                "1": "أكريلك",
-                "2": "جل",
-                "3": "تركيب أظافر"
+        # Initialize user session
+        if not user:
+            user = {
+                "last_step": "main_menu",
+                "service": None,
+                "name": None,
+                "date": None,
+                "time": None,
+                "completed": False,
+                "last_interaction_time": datetime.now()
             }
-            user["service"] = service_map.get(selected_id, "غير معروف")
-            user["last_step"] = "ask_name"
-            return send_whatsapp_message(phone_number, "شو الاسم؟")
+            data_store[phone_number] = user
+            return send_main_menu(phone_number)
 
-        elif user["last_step"] == "choose_date":
-            user["date"] = selected_id
-            user["last_step"] = "choose_time"
-            return send_time_slots(phone_number)
+        # Stop interaction after confirmation unless user sends a new message
+        if user.get("completed", False) and msg_type != "text":
+            return jsonify({"status": "ignored"}), 200
 
-        elif user["last_step"] == "choose_time":
-            user["time"] = selected_id
-            user["last_step"] = "confirm"
-            return send_confirmation(phone_number, user)
+        # Interactive response handler
+        if msg_type == "interactive":
+            selected_id = message["interactive"]["list_reply"]["id"]
+            step = user["last_step"]
 
-    # --------------------------
-    # 3. Text Messages
-    # --------------------------
-    elif msg_type == "text":
-        if user["last_step"] == "ask_name":
+            if step == "main_menu":
+                if selected_id == "d1":
+                    user["last_step"] = "choose_service"
+                    return send_service_list(phone_number)
+                elif selected_id == "d2":
+                    return send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
+                elif selected_id == "d3":
+                    return send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
+
+            elif step == "choose_service":
+                service_map = {
+                    "1": "أكريلك",
+                    "2": "جل",
+                    "3": "تركيب أظافر"
+                }
+                user["service"] = service_map.get(selected_id, "غير معروف")
+                user["last_step"] = "ask_name"
+                return send_whatsapp_message(phone_number, "شو الاسم؟")
+
+            elif step == "choose_date":
+                user["date"] = selected_id
+                user["last_step"] = "choose_time"
+                return send_time_slots(phone_number)
+
+            elif step == "choose_time":
+                user["time"] = selected_id
+                user["last_step"] = "confirm"
+                return send_confirmation(phone_number, user)
+
+            elif step == "confirm":
+                # Mark session complete
+                user["completed"] = True
+                return jsonify({"status": "done"}), 200
+
+        elif msg_type == "text" and user["last_step"] == "ask_name":
             user["name"] = message["text"]["body"]
             user["last_step"] = "choose_date"
             return send_date_slots(phone_number)
 
-        # If user is at confirm, ignore text until they reinitiate
-        if user["last_step"] == "confirm":
-            return jsonify({"status": "confirmed, waiting"}), 200
+        # Fallback response
+        return jsonify({"status": "ignored"}), 200
 
-    return jsonify({"status": "handled"}), 200
+    except Exception as e:
+        print("Webhook error:", e)
+        return jsonify({"error": str(e)}), 500
+
+
+import os
+from flask import request, jsonify
 
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
     VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_default_token")
+
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        return challenge, 200
-    return "Verification failed", 403
+
+    if mode and token:
+        if mode == "subscribe" and token == VERIFY_TOKEN:
+            print("WEBHOOK VERIFIED ✅")
+            return challenge, 200
+        else:
+            print("WEBHOOK VERIFICATION FAILED ❌")
+            return "Forbidden: Invalid token", 403
+    else:
+        print("WEBHOOK VERIFICATION MISSING PARAMS ⚠️")
+        return jsonify({"error": "Missing mode or token"}), 400
 
 
 

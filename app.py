@@ -1,4 +1,3 @@
-import json
 import os
 from datetime import timedelta
 
@@ -48,9 +47,6 @@ data_store = {}
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
     data = request.get_json()
-
-    # DEBUG: print the raw payload
-    print("Incoming webhook:", json.dumps(data, indent=2))
 
     try:
         value = data['entry'][0]['changes'][0]['value']

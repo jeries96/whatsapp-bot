@@ -36,6 +36,7 @@ def update_last_interaction(user_record):
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
     data = request.get_json()
+
     try:
         phone_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
         message = data['entry'][0]['changes'][0]['value']['messages'][0]
@@ -45,6 +46,7 @@ def whatsapp_webhook():
     msg_type = message.get("type")
     user = data_store.get(phone_number)
 
+    # --- New user ---
     if not user:
         user = {
             "last_step": "main_menu",
@@ -57,11 +59,23 @@ def whatsapp_webhook():
         data_store[phone_number] = user
         return send_main_menu(phone_number)
 
+    # --- Existing user who completed booking ---
+    if user["last_step"] == "confirm":
+        # They sent another message after booking → restart flow
+        user.update({
+            "last_step": "main_menu",
+            "service": None,
+            "name": None,
+            "date": None,
+            "time": None,
+            "last_interaction_time": datetime.now()
+        })
+        return send_main_menu(phone_number)
+
     update_last_interaction(user)
 
-    # --- Parse interactive reply ---
+    # --- Interactive reply (list selection) ---
     if msg_type == "interactive":
-        interactive_type = message["interactive"]["type"]
         selected_id = message["interactive"]["list_reply"]["id"]
 
         if user["last_step"] == "main_menu":
@@ -93,26 +107,13 @@ def whatsapp_webhook():
             user["last_step"] = "confirm"
             return send_confirmation(phone_number, user)
 
-        elif user["last_step"] == "confirm":
-            user.update({
-                "last_step": "main_menu",
-                "service": None,
-                "name": None,
-                "date": None,
-                "time": None,
-                "last_interaction_time": datetime.now()
-            })
-
-            return "DONE"
-
-
+    # --- Text input (ask_name step only) ---
     elif msg_type == "text" and user["last_step"] == "ask_name":
         user["name"] = message["text"]["body"]
         user["last_step"] = "choose_date"
         return send_date_slots(phone_number)
 
     return jsonify({"status": "handled"}), 200
-
 
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():

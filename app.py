@@ -84,8 +84,10 @@ def whatsapp_webhook():
                     user["last_step"] = "choose_service"
                     return send_service_list(phone_number)
                 elif selected_id == "d2":
+                    user["last_step"] = "choose_service"
                     return send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
                 elif selected_id == "d3":
+                    user["last_step"] = "choose_service"
                     return send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
 
             elif step == "choose_service":

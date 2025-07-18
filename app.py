@@ -24,6 +24,7 @@ def send_whatsapp_message(phone_number, message):
         "text": {"body": message}
     }
     response = requests.post(META_API_URL, headers=headers, json=payload)
+    print("Meta Response:", response.status_code, response.text)  # ← add this
     return response.status_code
 
 def is_session_expired(last_interaction_time):

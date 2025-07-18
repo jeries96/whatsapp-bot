@@ -46,9 +46,12 @@ def whatsapp_webhook():
     msg_type = message.get("type")
     user = data_store.get(phone_number)
 
-    # --- New user ---
-    if not user:
-        user = {
+    # --------------------------
+    # 1. New user or reactivated after confirm
+    # --------------------------
+    if not user or user.get("last_step") == "confirm":
+        # Start session
+        data_store[phone_number] = {
             "last_step": "main_menu",
             "service": None,
             "name": None,
@@ -56,25 +59,15 @@ def whatsapp_webhook():
             "time": None,
             "last_interaction_time": datetime.now()
         }
-        data_store[phone_number] = user
         return send_main_menu(phone_number)
 
-    # --- Existing user who completed booking ---
-    if user["last_step"] == "confirm":
-        # They sent another message after booking → restart flow
-        user.update({
-            "last_step": "main_menu",
-            "service": None,
-            "name": None,
-            "date": None,
-            "time": None,
-            "last_interaction_time": datetime.now()
-        })
-        return send_main_menu(phone_number)
-
+    # Existing active user
+    user = data_store[phone_number]
     update_last_interaction(user)
 
-    # --- Interactive reply (list selection) ---
+    # --------------------------
+    # 2. Interactive Messages
+    # --------------------------
     if msg_type == "interactive":
         selected_id = message["interactive"]["list_reply"]["id"]
 
@@ -107,11 +100,18 @@ def whatsapp_webhook():
             user["last_step"] = "confirm"
             return send_confirmation(phone_number, user)
 
-    # --- Text input (ask_name step only) ---
-    elif msg_type == "text" and user["last_step"] == "ask_name":
-        user["name"] = message["text"]["body"]
-        user["last_step"] = "choose_date"
-        return send_date_slots(phone_number)
+    # --------------------------
+    # 3. Text Messages
+    # --------------------------
+    elif msg_type == "text":
+        if user["last_step"] == "ask_name":
+            user["name"] = message["text"]["body"]
+            user["last_step"] = "choose_date"
+            return send_date_slots(phone_number)
+
+        # If user is at confirm, ignore text until they reinitiate
+        if user["last_step"] == "confirm":
+            return jsonify({"status": "confirmed, waiting"}), 200
 
     return jsonify({"status": "handled"}), 200
 

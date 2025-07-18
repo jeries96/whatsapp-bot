@@ -72,6 +72,7 @@ def whatsapp_webhook():
                 return send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
             elif selected_id == "d3":
                 return send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
+
         elif user["last_step"] == "choose_service":
             service_map = {
                 "1": "أكريلك",
@@ -81,19 +82,18 @@ def whatsapp_webhook():
             user["service"] = service_map.get(selected_id, "غير معروف")
             user["last_step"] = "ask_name"
             return send_whatsapp_message(phone_number, "شو الاسم؟")
+
         elif user["last_step"] == "choose_date":
             user["date"] = selected_id
             user["last_step"] = "choose_time"
             return send_time_slots(phone_number)
+
         elif user["last_step"] == "choose_time":
             user["time"] = selected_id
             user["last_step"] = "confirm"
             return send_confirmation(phone_number, user)
-        if user["last_step"] == "confirm":
-            # Optional: Send a closing message
-            send_whatsapp_message(phone_number, "تم الحجز ✅. فيك تحجز مره ثانية متى ما حبيت.")
 
-            # Reset user for a new session
+        elif user["last_step"] == "confirm":
             user.update({
                 "last_step": "main_menu",
                 "service": None,
@@ -103,8 +103,7 @@ def whatsapp_webhook():
                 "last_interaction_time": datetime.now()
             })
 
-            # Immediately send the menu again
-            return send_main_menu(phone_number)
+            return "DONE"
 
 
     elif msg_type == "text" and user["last_step"] == "ask_name":

@@ -25,8 +25,7 @@ def send_whatsapp_message(phone_number, message):
         "text": {"body": message}
     }
     response = requests.post(META_API_URL, headers=headers, json=payload)
-    print("Meta Response:", response.status_code, response.text)  # ← add this
-    return response.status_code
+    print("Meta Response:", response.status_code, response.text)
 
 
 def is_session_expired(last_interaction_time):
@@ -89,10 +88,12 @@ def whatsapp_webhook():
                     return send_service_list(phone_number)
                 elif selected_id == "d2":
                     user["last_step"] = "choose_service"
-                    return send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
+                    send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
+                    return jsonify({"status": "message sent"}), 200
                 elif selected_id == "d3":
                     user["last_step"] = "choose_service"
-                    return send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
+                    send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
+                    return jsonify({"status": "message sent"}), 200
 
             elif user["last_step"] == "choose_service":
                 service_map = {

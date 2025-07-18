@@ -103,7 +103,8 @@ def whatsapp_webhook():
                 }
                 user["service"] = service_map.get(selected_id, "غير معروف")
                 user["last_step"] = "ask_name"
-                return send_whatsapp_message(phone_number, "شو الاسم؟")
+                send_whatsapp_message(phone_number, "شو الاسم؟")
+                return jsonify({"status": "message sent"}), 200
 
             elif user["last_step"] == "choose_date":
                 user["date"] = selected_id
@@ -113,7 +114,8 @@ def whatsapp_webhook():
             elif user["last_step"] == "choose_time":
                 user["time"] = selected_id
                 user["last_step"] = "confirm"
-                return send_confirmation(phone_number, user)
+                send_confirmation(phone_number, user)
+                return jsonify({"status": "message sent"}), 200
 
         # --- Text message (used for name)
         elif msg_type == "text":
@@ -132,7 +134,7 @@ def whatsapp_webhook():
                     "time": None,
                     "last_interaction_time": datetime.now()
                 }
-                return "DONE"
+                return jsonify({"status": "message sent"}), 200
 
         return jsonify({"status": "message ignored"}), 200
 

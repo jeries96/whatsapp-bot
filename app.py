@@ -89,6 +89,23 @@ def whatsapp_webhook():
             user["time"] = selected_id
             user["last_step"] = "confirm"
             return send_confirmation(phone_number, user)
+        if user["last_step"] == "confirm":
+            # Optional: Send a closing message
+            send_whatsapp_message(phone_number, "تم الحجز ✅. فيك تحجز مره ثانية متى ما حبيت.")
+
+            # Reset user for a new session
+            user.update({
+                "last_step": "main_menu",
+                "service": None,
+                "name": None,
+                "date": None,
+                "time": None,
+                "last_interaction_time": datetime.now()
+            })
+
+            # Immediately send the menu again
+            return send_main_menu(phone_number)
+
 
     elif msg_type == "text" and user["last_step"] == "ask_name":
         user["name"] = message["text"]["body"]

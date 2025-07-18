@@ -35,73 +35,67 @@ def update_last_interaction(user_record):
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
     data = request.get_json()
-
     try:
         phone_number = data['entry'][0]['changes'][0]['value']['messages'][0]['from']
-        message_text = data['entry'][0]['changes'][0]['value']['messages'][0]['text']['body'].strip().lower()
+        message = data['entry'][0]['changes'][0]['value']['messages'][0]
     except KeyError:
-        return jsonify({"error": "Invalid webhook structure"}), 400
+        return jsonify({"error": "Invalid structure"}), 400
 
+    msg_type = message.get("type")
     user = data_store.get(phone_number)
 
     if not user:
-        data_store[phone_number] = {
-            "last_step": "ask_action",
-            "last_interaction_time": datetime.now(),
+        user = {
+            "last_step": "main_menu",
             "service": None,
             "name": None,
             "date": None,
-            "time": None
+            "time": None,
+            "last_interaction_time": datetime.now()
         }
-        send_whatsapp_message(phone_number, "Hi! What would you like to do?")
-        return jsonify({"status": "new user initialized"})
+        data_store[phone_number] = user
+        return send_main_menu(phone_number)
 
-    if is_session_expired(user["last_interaction_time"]) or user["last_step"] == "confirm":
-        user.update({
-            "last_step": "ask_action",
-            "service": None,
-            "name": None,
-            "date": None,
-            "time": None
-        })
-        update_last_interaction(user)
-        send_whatsapp_message(phone_number, "Hi again! What would you like to do?")
-        return jsonify({"status": "session reset"})
-
-    step = user["last_step"]
     update_last_interaction(user)
 
-    if step == "ask_action":
-        user["last_step"] = "ask_service"
-        send_whatsapp_message(phone_number, "Great. What service do you need?")
-    elif step == "ask_service":
-        user["service"] = message_text
-        user["last_step"] = "ask_name"
-        send_whatsapp_message(phone_number, "Got it. What is your name?")
-    elif step == "ask_name":
-        user["name"] = message_text
-        user["last_step"] = "ask_date"
-        send_whatsapp_message(phone_number, "Thanks. What date works for you?")
-    elif step == "ask_date":
-        user["date"] = message_text
-        user["last_step"] = "ask_time"
-        send_whatsapp_message(phone_number, "And what time?")
-    elif step == "ask_time":
-        user["time"] = message_text
-        user["last_step"] = "confirm"
-        confirm_msg = (
-            f"Please confirm:\n"
-            f"Service: {user['service']}\n"
-            f"Name: {user['name']}\n"
-            f"Date: {user['date']}\n"
-            f"Time: {user['time']}"
-        )
-        send_whatsapp_message(phone_number, confirm_msg)
-    else:
-        send_whatsapp_message(phone_number, "Something went wrong. Let's start over.")
-        user["last_step"] = "ask_action"
+    # --- Parse interactive reply ---
+    if msg_type == "interactive":
+        interactive_type = message["interactive"]["type"]
+        selected_id = message["interactive"]["list_reply"]["id"]
 
-    return jsonify({"status": "message processed"})
+        if user["last_step"] == "main_menu":
+            if selected_id == "d1":
+                user["last_step"] = "choose_service"
+                return send_service_list(phone_number)
+            elif selected_id == "d2":
+                return send_whatsapp_message(phone_number, "اوقات العمل ⏰ من 10 صباحًا إلى 8 مساءً")
+            elif selected_id == "d3":
+                return send_whatsapp_message(phone_number, "تم تغيير اللغة. Language changed ✅")
+        elif user["last_step"] == "choose_service":
+            service_map = {
+                "1": "أكريلك",
+                "2": "جل",
+                "3": "تركيب أظافر"
+            }
+            user["service"] = service_map.get(selected_id, "غير معروف")
+            user["last_step"] = "ask_name"
+            return send_whatsapp_message(phone_number, "شو الاسم؟")
+        elif user["last_step"] == "choose_date":
+            user["date"] = selected_id
+            user["last_step"] = "choose_time"
+            return send_time_slots(phone_number)
+        elif user["last_step"] == "choose_time":
+            user["time"] = selected_id
+            user["last_step"] = "confirm"
+            return send_confirmation(phone_number, user)
+
+    elif msg_type == "text" and user["last_step"] == "ask_name":
+        user["name"] = message["text"]["body"]
+        user["last_step"] = "choose_date"
+        return send_date_slots(phone_number)
+
+    return jsonify({"status": "handled"}), 200
+
 
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
@@ -112,6 +106,111 @@ def verify_webhook():
     if mode == "subscribe" and token == VERIFY_TOKEN:
         return challenge, 200
     return "Verification failed", 403
+
+
+
+def send_main_menu(phone_number):
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone_number,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "header": {"type": "text", "text": "هلا،كيفك؟ ✋"},
+            "body": {"text": "كيف ممكن أساعدك اليوم؟"},
+            "action": {
+                "button": "اختيار",
+                "sections": [{
+                    "title": "Available Options",
+                    "rows": [
+                        {"id": "d1", "title": "حجز دور 📅"},
+                        {"id": "d2", "title": "اوقات العمل ⏰"},
+                        {"id": "d3", "title": "تغيير لغه", "description": "Change language"}
+                    ]
+                }]
+            }
+        }
+    }
+    return send_whatsapp_payload(payload)
+
+def send_service_list(phone_number):
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone_number,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "body": {"text": "شو حابة تعملي؟ 💅"},
+            "action": {
+                "button": "Select Date",
+                "sections": [{
+                    "title": "Available Services",
+                    "rows": [
+                        {"id": "1", "title": "💅 أكريلك (اكريل)", "description": "450"},
+                        {"id": "2", "title": "💅 جل", "description": "100"},
+                        {"id": "3", "title": "💅 تركيب أظافر", "description": "300"}
+                    ]
+                }]
+            }
+        }
+    }
+    return send_whatsapp_payload(payload)
+
+def send_date_slots(phone_number):
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone_number,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "body": {"text": "اختاري التاريخ المناسب 📅"},
+            "action": {
+                "button": "تواريخ",
+                "sections": [{
+                    "title": "Available Dates",
+                    "rows": [{"id": f"2025-07-{i+18}", "title": f"2025-07-{i+18}"} for i in range(7)]
+                }]
+            }
+        }
+    }
+    return send_whatsapp_payload(payload)
+
+def send_time_slots(phone_number):
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone_number,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "body": {"text": "اختاري الوقت المناسب ⏰"},
+            "action": {
+                "button": "اوقات",
+                "sections": [{
+                    "title": "Available Times",
+                    "rows": [{"id": f"{10+i}:00", "title": f"{10+i}:00"} for i in range(7)]
+                }]
+            }
+        }
+    }
+    return send_whatsapp_payload(payload)
+
+def send_confirmation(phone_number, user):
+    msg = (
+        f"تم تأكيد الحجز ✅\n\n"
+        f"الاسم: {user['name']}\n"
+        f"الخدمة: {user['service']}\n"
+        f"التاريخ: {user['date']}\n"
+        f"الوقت: {user['time']}\n"
+    )
+    return send_whatsapp_message(phone_number, msg)
+
+def send_whatsapp_payload(payload):
+    headers = {
+        "Authorization": f"Bearer {META_ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    response = requests.post(META_API_URL, headers=headers, json=payload)
+    return jsonify({"status": response.status_code})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))

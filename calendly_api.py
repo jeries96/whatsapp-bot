@@ -4,7 +4,7 @@ from datetime import timedelta, timezone
 import requests
 from babel.dates import format_datetime
 from dotenv import load_dotenv
-from flask import Flask
+from flask import Flask, Blueprint
 from flask import request, jsonify
 
 load_dotenv()
@@ -13,6 +13,8 @@ app = Flask(__name__)
 
 CALENDLY_TOKEN = os.environ.get("CALENDLY_TOKEN")
 EVENT_TYPE_URL = os.environ.get("EVENT_TYPE_URL")
+
+calendly_bp = Blueprint("calendly", __name__)
 
 
 def get_available_dates(limit=7, days_ahead=30):
@@ -205,64 +207,39 @@ def create_booking(name, email, date_time):
 
 # === REST API Endpoints ===
 
-@app.route("/available-dates-count", methods=["GET"])
-def api_available_dates_count():
-    dates = get_available_dates()
-    return {"count": len(dates)}
-
-
-@app.route("/available-dates", methods=["GET"])
+@calendly_bp.route("/available-dates", methods=["GET"])
 def api_available_dates():
     dates = get_available_datess()
     return jsonify(dates)
 
 
-@app.route("/available-times-count", methods=["POST"])
-def api_available_times_count():
-    data = request.get_json()
-    date = data.get("date") if data else None
-
-    if not date:
-        return jsonify({"error": "Missing 'date' in body"}), 400
-
-    times = get_available_times(date)
-    return jsonify({"count": len(times)})
-
-
-@app.route("/available-times", methods=["POST"])
+@calendly_bp.route("/available-times", methods=["POST"])
 def api_available_times():
     data = request.get_json()
-    date = data.get("date") if data else None
-
+    date = data.get("date")
     if not date:
-        return jsonify({"error": "Missing 'date' in body"}), 400
-
-    times = get_available_timess(date)
-    return jsonify(times)
+        return jsonify({"error": "Missing 'date'"}), 400
+    return jsonify(get_available_timess(date))
 
 
-@app.route("/create-booking", methods=["POST"])
+@calendly_bp.route("/create-booking", methods=["POST"])
 def api_create_booking():
-    data = request.json
+    data = request.get_json()
     name = data.get("name")
     email = data.get("email")
     date = data.get("date")
     time = data.get("time")
 
     if not all([name, email, date, time]):
-        return jsonify({"error": "Missing required fields: name, email, date, time"}), 400
+        return jsonify({"error": "Missing fields"}), 400
 
     try:
-        # Combine date + time and assume it's in Asia/Jerusalem
-        naive_local = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
-        local_tz = pytz.timezone("Asia/Jerusalem")
-        aware_local = local_tz.localize(naive_local)
-
-        # Convert to UTC for ISO format
-        date_time_utc = aware_local.astimezone(pytz.utc)
-        date_time_iso = date_time_utc.isoformat()
+        naive = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+        local = pytz.timezone("Asia/Jerusalem").localize(naive)
+        utc = local.astimezone(pytz.utc)
+        date_time_iso = utc.isoformat()
     except Exception as e:
-        return jsonify({"error": f"Invalid date/time format: {e}"}), 400
+        return jsonify({"error": str(e)}), 400
 
     result = create_booking(name, email, date_time_iso)
     return jsonify(result)

@@ -142,6 +142,7 @@ def whatsapp_webhook():
         print("Webhook error:", str(e))
         return jsonify({"error": "internal error"}), 500
 
+
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
     VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "my_default_token")
@@ -160,6 +161,11 @@ def verify_webhook():
     else:
         print("WEBHOOK VERIFICATION MISSING PARAMS ⚠️")
         return jsonify({"error": "Missing mode or token"}), 400
+
+
+from calendly_api import calendly_bp
+
+app.register_blueprint(calendly_bp)
 
 
 def send_main_menu(phone_number):

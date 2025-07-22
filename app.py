@@ -118,6 +118,7 @@ def get_available_timess(date):
         "Content-Type": "application/json"
     }
 
+    # Define start and end of the selected day in UTC
     iso_start = f"{date}T00:00:00Z"
     iso_end = f"{date}T23:59:59Z"
 
@@ -125,23 +126,28 @@ def get_available_timess(date):
         "event_type": EVENT_TYPE_URL,
         "start_time": iso_start,
         "end_time": iso_end,
-        "timezone": "Asia/Jerusalem"
+        "timezone": "Asia/Jerusalem"  # This affects Calendly's logic, not returned format
     }
 
-    response = requests.get(url, headers=headers, params=params)
-
-    if response.ok:
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
         slots = response.json().get("collection", [])
+
         jerusalem = pytz.timezone("Asia/Jerusalem")
-        times = []
+        times = set()
 
         for slot in slots:
-            utc_time = datetime.fromisoformat(slot["start_time"].replace("Z", "+00:00"))
-            local_time = utc_time.astimezone(jerusalem)
-            formatted = local_time.strftime("%H:%M")
-            times.append(formatted)
+            start_str = slot.get("start_time")
+            if not start_str:
+                continue  # Skip empty or malformed slot
 
-        # Sort and return list of dicts with title and description
+            # Parse and convert from UTC to Asia/Jerusalem
+            utc_time = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
+            local_time = utc_time.astimezone(jerusalem)
+            times.add(local_time.strftime("%H:%M"))
+
+        # Return sorted unique time slots
         return [
             {
                 "id": str(i + 1),
@@ -151,8 +157,8 @@ def get_available_timess(date):
             for i, t in enumerate(sorted(times))
         ]
 
-    else:
-        print("❌ Calendly error:", response.status_code, response.text)
+    except Exception as e:
+        print("❌ Calendly error:", str(e))
         return []
 
 
